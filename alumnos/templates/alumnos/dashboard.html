@@ -1,0 +1,80 @@
+{% extends 'alumnos/base.html' %}
+{% load static %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="text-center mb-4">
+  <h2 class="fw-bold text-success">🎯 Resumen Mensual de Asistencia</h2>
+</div>
+
+<!-- Filtro por mes -->
+<form method="get" class="mb-4 text-center">
+  <label for="mes" class="form-label fw-semibold">Seleccionar Mes:</label>
+  <input type="month" id="mes" name="mes" value="{{ mes_actual }}" class="form-control d-inline-block w-auto mx-2" />
+  <button type="submit" class="btn btn-outline-primary">Aplicar</button>
+</form>
+
+<!-- Mejores cursos -->
+<div class="row mb-5">
+  {% for item in mejores_cursos %}
+  <div class="col-md-4 mb-3">
+    <div class="card shadow border-success">
+      <div class="card-body text-center">
+        <h5 class="card-title fw-bold text-success">🏆 {{ item.curso.nombre }}</h5>
+        <p class="card-text fs-5">Promedio de Asistencia: <strong>{{ item.promedio }}%</strong></p>
+      </div>
+    </div>
+  </div>
+  {% empty %}
+  <p class="text-muted text-center">No hay datos de asistencia para este mes.</p>
+  {% endfor %}
+</div>
+
+<!-- Ayuda sobre cursos críticos -->
+<div class="mb-2">
+  <div class="alert alert-info small d-flex align-items-start" style="border-radius: 0.75rem;">
+    <span class="me-2" style="font-size: 1.2rem;">ℹ️</span>
+    <div>
+      <strong>¿Qué es un curso crítico?</strong><br>
+      Un <u>curso crítico</u> es aquel que presenta un <strong>promedio de asistencia inferior al {{ umbral_critico }}%</strong> durante el mes seleccionado.
+      Esto puede indicar problemas de asistencia reiterados en varios alumnos.
+      <br><br>
+      <strong>¿Cómo mejorar?</strong><br>
+      Se recomienda:
+      <ul class="mb-0 ps-3">
+        <li>Revisar casos de alumnos con inasistencias frecuentes.</li>
+        <li>Contactar a apoderados para levantar información.</li>
+        <li>Implementar estrategias motivacionales o acompañamiento escolar.</li>
+        <li>Coordinar acciones con el equipo de Convivencia Escolar.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Cursos críticos -->
+<div class="card border-danger shadow">
+  <div class="card-body">
+    <h4 class="fw-semibold text-danger">
+      🚩 Cursos críticos
+      <span class="ms-1" data-bs-toggle="tooltip" data-bs-placement="right" title="Promedio de asistencia inferior al {{ umbral_critico }}%. Requiere seguimiento.">
+        <i class="bi bi-info-circle"></i>
+      </span>
+    </h4>
+    <div class="row">
+      {% for item in cursos_criticos %}
+      <div class="col-md-4 mb-3">
+        <div class="card border-danger h-100">
+          <div class="card-body text-center">
+            <h5 class="card-title text-danger fw-bold">{{ item.curso.nombre }}</h5>
+            <p class="card-text fs-5">Promedio: <strong>{{ item.promedio }}%</strong></p>
+          </div>
+        </div>
+      </div>
+      {% empty %}
+      <p class="text-muted text-center mt-3">No hay cursos críticos este mes 🎉</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

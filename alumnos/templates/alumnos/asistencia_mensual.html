@@ -1,0 +1,321 @@
+{% extends "alumnos/base.html" %}
+{% block title %}Asistencia Mensual{% endblock %}
+{% block content %}
+<style>
+  /* Indicadores de estado */
+  .estado { font-size: .85rem; white-space: nowrap; }
+  .estado.saving::before { content: "⏳ Guardando…"; color: #6c757d; }
+  .estado.saved::before  { content: "✓ Guardado"; color: #198754; }
+  .estado.error::before  { content: "✖ Error"; color: #dc3545; }
+  .fade-out { animation: fadeout 1.8s forwards; }
+  @keyframes fadeout { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+</style>
+
+<div class="card card-custom p-4">
+  <h3 class="mb-4 text-center">📅 Asistencia Mensual</h3>
+
+  <form method="get" class="row g-3 mb-4">
+    <div class="col-md-4">
+      <label class="form-label">Curso:</label>
+      <select name="curso" class="form-select" onchange="this.form.submit()">
+        {% for c in cursos %}
+          <option value="{{ c.id }}" {% if curso_id|add:""|stringformat:"s" == c.id|stringformat:"s" %}selected{% endif %}>{{ c.nombre }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-4">
+      <label class="form-label">Mes:</label>
+      <input type="month" name="mes" value="{{ mes }}" class="form-control" onchange="this.form.submit()">
+    </div>
+  </form>
+
+  {% if curso and alumnos_asistencia %}
+  <form method="post" id="formAsistencia">
+    {% csrf_token %}
+    <input type="hidden" id="curso_id" value="{{ curso_id }}">
+    <input type="hidden" id="mes_actual" value="{{ mes }}">
+
+    <div class="table-responsive">
+      <table class="table table-bordered align-middle" id="tablaAsistencia">
+        <thead class="table-light">
+          <tr>
+            <th>Alumno</th>
+            <th>Días Presentes</th>
+            <th>Días Inasistentes</th>
+            <th>Porcentaje Asistencia (%)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in alumnos_asistencia %}
+            <tr data-alumno-id="{{ item.alumno.id }}">
+              <td class="alumno-nombre">
+                {{ item.alumno.nombre_completo }}
+                <div class="estado d-inline-block ms-2 estado-fila"></div>
+              </td>
+              <td>
+                <input type="number" name="presentes_{{ item.alumno.id }}" class="form-control input-presentes"
+                  value="{{ item.asistencia.presentes|default:dias_clases }}" min="0" step="1">
+              </td>
+              <td>
+                <input type="number" name="inasistentes_{{ item.alumno.id }}" class="form-control input-inasistentes"
+                  value="{{ item.asistencia.inasistentes|default:0 }}" min="0" step="1">
+              </td>
+              <td class="text-center celda-porcentaje">
+                <span class="valor-porcentaje">{{ item.porcentaje }}</span>%
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr class="table-light">
+            <td>
+              <strong>Total Alumnos: <span id="totalAlumnos">{{ total_alumnos }}</span></strong>
+              <div class="estado d-inline-block ms-2" id="estado-dias"></div>
+            </td>
+            <td colspan="2" class="text-end"><strong>Promedio General Asistencia:</strong></td>
+            <td class="text-center"><strong><span id="promedioAsistencia">{{ promedio_asistencia }}</span>%</strong></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="mb-3 mt-4">
+      <label class="form-label">Días de clases del curso en el mes:</label>
+      <input type="number" id="dias_clases" name="dias_clases" class="form-control"
+             value="{{ dias_clases|default:0 }}" min="0" step="1" required>
+    </div>
+
+    <div class="d-grid mt-4">
+      <button type="submit" class="btn btn-success">💾 Guardar Asistencia</button>
+    </div>
+  </form>
+  {% endif %}
+</div>
+
+<script>
+(function() {
+  const diasInput = document.getElementById('dias_clases');
+  const form = document.getElementById('formAsistencia');
+  const tabla = document.getElementById('tablaAsistencia');
+  const cursoId = document.getElementById('curso_id') ? document.getElementById('curso_id').value : '';
+  const mesActual = document.getElementById('mes_actual') ? document.getElementById('mes_actual').value : '';
+  const promedioSpan = document.getElementById('promedioAsistencia');
+  const totalAlumnosSpan = document.getElementById('totalAlumnos');
+  const estadoDias = document.getElementById('estado-dias');
+
+  function getCSRFTOKEN() {
+    const input = document.querySelector('input[name=csrfmiddlewaretoken]');
+    return input ? input.value : '';
+  }
+
+  function getTotal() {
+    const v = parseInt(diasInput.value, 10);
+    return isNaN(v) ? 0 : Math.max(0, v);
+  }
+
+  function clamp(n, min, max) { return Math.min(Math.max(n, min), max); }
+
+  function calcularPorcentaje(presentes, total) {
+    if (!total || total <= 0) return 0;
+    return Math.round((presentes / total) * 1000) / 10; // 1 decimal
+  }
+
+  function actualizarFooter() {
+    const total = getTotal();
+    let sumaPorcentajes = 0;
+    let filas = 0;
+
+    tabla.querySelectorAll('tbody tr[data-alumno-id]').forEach(row => {
+      const p = parseInt(row.querySelector('.input-presentes').value || '0', 10);
+      const porcentaje = calcularPorcentaje(p, total);
+      sumaPorcentajes += porcentaje;
+      filas += 1;
+    });
+
+    if (totalAlumnosSpan) totalAlumnosSpan.textContent = filas.toString();
+    if (promedioSpan) {
+      const prom = filas ? Math.round((sumaPorcentajes / filas) * 10) / 10 : 0;
+      promedioSpan.textContent = prom.toFixed(1);
+    }
+  }
+
+  // --- Indicadores de estado ---
+  function setEstado(el, clase) {
+    if (!el) return;
+    el.classList.remove('saving', 'saved', 'error', 'fade-out');
+    if (clase) el.classList.add(clase);
+    if (clase === 'saved') {
+      setTimeout(() => el.classList.add('fade-out'), 300);
+      setTimeout(() => { el.classList.remove('saved', 'fade-out'); }, 2200);
+    }
+  }
+
+  // --- AUTOSAVE ---
+  let saveTimer = null;
+  function debounceSave(fn) {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(fn, 400);
+  }
+
+  function autosaveAsistencia(row) {
+    const total = getTotal();
+    const alumnoId = row.getAttribute('data-alumno-id');
+    const inpP = row.querySelector('.input-presentes');
+    const inpI = row.querySelector('.input-inasistentes');
+    const estadoFila = row.querySelector('.estado-fila');
+
+    let p = parseInt(inpP.value || '0', 10);
+    let i = parseInt(inpI.value || '0', 10);
+
+    // Normaliza con el total
+    p = clamp(isNaN(p) ? 0 : p, 0, total);
+    i = clamp(isNaN(i) ? 0 : i, 0, total);
+    if (p + i !== total) { i = clamp(total - p, 0, total); }
+    inpP.value = p; inpI.value = i;
+
+    // % y footer
+    const celdaPct = row.querySelector('.celda-porcentaje .valor-porcentaje');
+    const pct = calcularPorcentaje(p, total);
+    if (celdaPct) celdaPct.textContent = pct.toFixed(1);
+    actualizarFooter();
+
+    setEstado(estadoFila, 'saving');
+
+    const formData = new FormData();
+    formData.append('alumno_id', alumnoId);
+    formData.append('curso_id', cursoId);
+    formData.append('mes', mesActual);
+    formData.append('presentes', p);
+    formData.append('inasistentes', i);
+
+    fetch('{% url "ajax_actualizar_asistencia" %}', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCSRFTOKEN() },
+      body: formData
+    }).then(r => r.json()).then(data => {
+      if (!data.ok) {
+        setEstado(estadoFila, 'error');
+        console.warn('No se pudo guardar automáticamente:', data.error);
+      } else {
+        if (typeof data.porcentaje === 'number' && celdaPct) {
+          celdaPct.textContent = data.porcentaje.toFixed(1);
+        }
+        actualizarFooter();
+        setEstado(estadoFila, 'saved');
+      }
+    }).catch(err => {
+      setEstado(estadoFila, 'error');
+      console.error('Error autosave:', err);
+    });
+  }
+
+  function autosaveDiasClases() {
+    if (!estadoDias) return;
+    setEstado(estadoDias, 'saving');
+
+    const formData = new FormData();
+    formData.append('curso_id', cursoId);
+    formData.append('mes', mesActual);
+    formData.append('dias_clases', getTotal());
+
+    fetch('{% url "ajax_actualizar_dias_clases" %}', {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCSRFTOKEN() },
+      body: formData
+    }).then(r => r.json()).then(data => {
+      if (!data.ok) {
+        setEstado(estadoDias, 'error');
+        console.warn('No se pudieron guardar los días de clases:', data.error);
+      } else {
+        setEstado(estadoDias, 'saved');
+      }
+    }).catch(err => {
+      setEstado(estadoDias, 'error');
+      console.error('Error guardando días de clases:', err);
+    });
+  }
+
+  // --- Edición por fila ---
+  function syncRow(row, changedField) {
+    const total = getTotal();
+    const inpP = row.querySelector('.input-presentes');
+    const inpI = row.querySelector('.input-inasistentes');
+
+    let p = parseInt(inpP.value, 10);
+    let i = parseInt(inpI.value, 10);
+    p = isNaN(p) ? 0 : p;
+    i = isNaN(i) ? 0 : i;
+
+    if (changedField === 'P') {
+      p = clamp(p, 0, total);
+      i = clamp(total - p, 0, total);
+    } else if (changedField === 'I') {
+      i = clamp(i, 0, total);
+      p = clamp(total - i, 0, total);
+    }
+
+    inpP.value = p;
+    inpI.value = i;
+
+    const celdaPct = row.querySelector('.celda-porcentaje .valor-porcentaje');
+    const pct = calcularPorcentaje(p, total);
+    if (celdaPct) celdaPct.textContent = pct.toFixed(1);
+    actualizarFooter();
+
+    debounceSave(() => autosaveAsistencia(row));
+  }
+
+  // ========= CAMBIO CLAVE =========
+  // Cuando cambian los días de clases:
+  //  -> Setea TODAS las filas a Presentes = total, Inasistentes = 0
+  //  -> Recalcula % y footer
+  //  -> Autosave SOLO de los días totales (no por alumno)
+  diasInput.addEventListener('input', () => {
+    const total = getTotal();
+    tabla.querySelectorAll('tbody tr[data-alumno-id]').forEach(row => {
+      const inpP = row.querySelector('.input-presentes');
+      const inpI = row.querySelector('.input-inasistentes');
+      inpP.value = total;
+      inpI.value = 0;
+      inpP.max = total;
+      inpI.max = total;
+
+      const celdaPct = row.querySelector('.celda-porcentaje .valor-porcentaje');
+      if (celdaPct) celdaPct.textContent = calcularPorcentaje(total, total).toFixed(1); // 100.0 o 0 si total=0
+    });
+    actualizarFooter();
+    debounceSave(autosaveDiasClases);
+  });
+
+  // Listeners de edición manual
+  tabla.querySelectorAll('.input-presentes').forEach(inp => {
+    inp.addEventListener('input', (e) => { syncRow(e.target.closest('tr'), 'P'); });
+  });
+  tabla.querySelectorAll('.input-inasistentes').forEach(inp => {
+    inp.addEventListener('input', (e) => { syncRow(e.target.closest('tr'), 'I'); });
+  });
+
+  // ========= NUEVO: Normaliza antes de enviar (por si cambiaste días y guardaste rápido)
+  if (form) {
+    form.addEventListener('submit', (e) => {
+      const total = getTotal();
+      tabla.querySelectorAll('tbody tr[data-alumno-id]').forEach(row => {
+        const inpP = row.querySelector('.input-presentes');
+        const inpI = row.querySelector('.input-inasistentes');
+        let p = parseInt(inpP.value || '0', 10);
+        let i = parseInt(inpI.value || '0', 10);
+        if (isNaN(p)) p = 0;
+        if (isNaN(i)) i = 0;
+        p = clamp(p, 0, total);
+        i = clamp(total - p, 0, total); // fuerza suma = total
+        inpP.value = p;
+        inpI.value = i;
+      });
+    });
+  }
+
+  // Inicializa footer al cargar
+  window.addEventListener('DOMContentLoaded', actualizarFooter);
+})();
+</script>
+{% endblock %}

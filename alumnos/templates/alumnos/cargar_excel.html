@@ -1,0 +1,38 @@
+{% extends "alumnos/base.html" %}
+
+{% block title %}Cargar Alumnos desde Excel{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6">
+    <div class="card card-custom p-4">
+      <h3 class="text-center mb-4">📥 Cargar Lista de Alumnos</h3>
+
+      {% if messages %}
+        {% for message in messages %}
+          <div class="alert alert-success">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="mb-3">
+          <label for="excel_file" class="form-label">Selecciona archivo Excel (.xlsx):</label>
+          <input type="file" name="excel_file" id="excel_file" class="form-control" required>
+        </div>
+        <div class="d-grid mb-2">
+          <button type="submit" class="btn btn-primary">Cargar Alumnos</button>
+        </div>
+      </form>
+
+      <form method="post" onsubmit="return confirm('¿Estás seguro de eliminar TODOS los alumnos y cursos? Esta acción no se puede deshacer.')">
+        {% csrf_token %}
+        <input type="hidden" name="eliminar_bd" value="1">
+        <div class="d-grid">
+          <button type="submit" class="btn btn-danger">🗑 Eliminar base de datos</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,194 @@
+{% extends "alumnos/base.html" %}
+{% block title %}Estadísticas{% endblock %}
+{% block content %}
+<div class="card card-custom p-4">
+  <h3 class="mb-4 text-center">📊 Estadísticas de Asistencia</h3>
+
+  <form method="get" class="row g-3 mb-4" id="formMes">
+    <div class="col-md-4">
+      <label class="form-label">Mes:</label>
+      <input type="month" name="mes" value="{{ mes }}" class="form-control" id="inputMes">
+    </div>
+  </form>
+
+  <!-- Podio Top 3 -->
+  <div class="mb-4">
+    <h5 class="mb-3">🏆 Mejores cursos del mes</h5>
+    <div class="row text-center" id="podio">
+      <div class="col-md-4 mb-3">
+        <div class="p-3 border rounded-3 h-100" id="puesto-2">
+          <div class="fs-3">🥈</div>
+          <div class="fw-bold curso-nombre">—</div>
+          <div class="text-muted curso-detalle">—</div>
+        </div>
+      </div>
+      <div class="col-md-4 mb-3">
+        <div class="p-3 border rounded-3 h-100 bg-light" id="puesto-1">
+          <div class="fs-2">🥇</div>
+          <div class="fw-bold curso-nombre">—</div>
+          <div class="text-muted curso-detalle">—</div>
+        </div>
+      </div>
+      <div class="col-md-4 mb-3">
+        <div class="p-3 border rounded-3 h-100" id="puesto-3">
+          <div class="fs-3">🥉</div>
+          <div class="fw-bold curso-nombre">—</div>
+          <div class="text-muted curso-detalle">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gráfico de barras -->
+  <div class="mb-4" style="height: 420px;">
+    <h5 class="mb-3">📈 % Asistencia por curso (mensual)</h5>
+    <canvas id="graficoCursos"></canvas>
+  </div>
+
+  <!-- Tabla de referencia -->
+  <div class="table-responsive">
+    <table class="table table-bordered align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>Curso</th>
+          <th>% Asistencia</th>
+          <th>Alumnos</th>
+          <th>Presentes Totales</th>
+          <th>Días de clases (mes)</th>
+        </tr>
+      </thead>
+      <tbody id="tablaBody">
+        <!-- Se llena por JS -->
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function(){
+  const inputMes = document.getElementById('inputMes');
+  const tablaBody = document.getElementById('tablaBody');
+  const puesto1 = document.querySelector('#puesto-1');
+  const puesto2 = document.querySelector('#puesto-2');
+  const puesto3 = document.querySelector('#puesto-3');
+  const ctx = document.getElementById('graficoCursos').getContext('2d');
+
+  let chart = null;
+
+  function safeNumber(n) {
+    // Sanitiza cualquier valor no finito, NaN, null o undefined -> 0
+    const v = Number(n);
+    return Number.isFinite(v) ? v : 0;
+  }
+
+  function renderPodio(top3) {
+    const slots = [puesto1, puesto2, puesto3];
+    const medals = ['🥇', '🥈', '🥉'];
+
+    // Limpia
+    [puesto1, puesto2, puesto3].forEach((el, idx) => {
+      el.querySelector('.curso-nombre').textContent = '—';
+      el.querySelector('.curso-detalle').textContent = '—';
+      el.querySelector('div.fs-2, div.fs-3').textContent = medals[idx];
+    });
+
+    // Orden visual: centramos el 1°, izquierda 2°, derecha 3°
+    const orden = [0,1,2]; // índices del array top3
+    orden.forEach((k, i) => {
+      const data = top3[k];
+      const cont = [puesto1, puesto2, puesto3][i];
+      if (data) {
+        const pct = safeNumber(data.porcentaje).toFixed(1);
+        cont.querySelector('.curso-nombre').textContent = data.curso;
+        cont.querySelector('.curso-detalle').textContent = `${pct}% • ${safeNumber(data.alumnos)} alum.`;
+      }
+    });
+  }
+
+  function renderTabla(cursos) {
+    tablaBody.innerHTML = '';
+    (cursos || [])
+      .slice()
+      .sort((a,b) => a.curso.localeCompare(b.curso, 'es'))
+      .forEach(c => {
+        const pct = safeNumber(c.porcentaje).toFixed(1);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${c.curso}</td>
+          <td class="text-end"><strong>${pct}%</strong></td>
+          <td class="text-end">${safeNumber(c.alumnos)}</td>
+          <td class="text-end">${safeNumber(c.presentes_total)}</td>
+          <td class="text-end">${safeNumber(c.dias_clases)}</td>
+        `;
+        tablaBody.appendChild(tr);
+      });
+  }
+
+  function renderChart(cursos) {
+    const labels = (cursos || []).map(c => c.curso);
+    const datos = (cursos || []).map(c => safeNumber(c.porcentaje));
+
+    if (chart) chart.destroy();
+
+    chart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: '% asistencia',
+          data: datos
+          // (no definimos colores manualmente por tu guía)
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: {
+            beginAtZero: true,
+            suggestedMax: 100,
+            max: 100,
+            ticks: { callback: v => v + '%' }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => `${safeNumber(ctx.parsed.y)}%` } }
+        }
+      }
+    });
+  }
+
+  async function cargarDatos() {
+    const mes = inputMes.value;
+    const url = `{% url "ajax_estadisticas_mes" %}?mes=${encodeURIComponent(mes)}`;
+
+    try {
+      const resp = await fetch(url);
+      const data = await resp.json();
+
+      if (!data.ok) throw new Error(data.error || 'Error desconocido');
+
+      // Ordena por % desc para el gráfico
+      const cursosOrden = (data.cursos || [])
+        .map(c => ({ ...c, porcentaje: safeNumber(c.porcentaje) }))
+        .sort((a,b) => b.porcentaje - a.porcentaje);
+
+      renderPodio((data.top3 || []).map(c => ({ ...c, porcentaje: safeNumber(c.porcentaje) })));
+      renderTabla(data.cursos || []);
+      renderChart(cursosOrden);
+    } catch (e) {
+      console.error('Error cargando estadísticas:', e);
+      renderPodio([]);
+      renderTabla([]);
+      renderChart([]);
+    }
+  }
+
+  inputMes.addEventListener('change', cargarDatos);
+  cargarDatos(); // carga inicial
+})();
+</script>
+{% endblock %}

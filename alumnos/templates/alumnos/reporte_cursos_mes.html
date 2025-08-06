@@ -1,0 +1,182 @@
+{# alumnos/templates/alumnos/reporte_cursos_mes.html #}
+{% extends "alumnos/base.html" %}
+{% block title %}Reporte por curso (mensual){% endblock %}
+
+{% block content %}
+<style>
+  /* Rotación suave del ícono (chevron) */
+  .chevron {
+    display: inline-block;
+    transition: transform 0.25s ease;
+  }
+  .chevron.rotate {
+    transform: rotate(90deg);
+  }
+</style>
+
+<div class="card card-custom p-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+    <h3 class="mb-2 mb-md-0">🧮 Reporte por curso (mensual)</h3>
+    <form method="get" class="d-flex gap-2">
+      <div>
+        <label class="form-label mb-1">Mes</label>
+        <input type="month" name="mes" value="{{ mes }}" class="form-control" onchange="this.form.submit()">
+      </div>
+      <div class="align-self-end">
+        <button type="submit" class="btn btn-primary">Actualizar</button>
+      </div>
+    </form>
+  </div>
+
+  <p class="text-muted">Dos tablas por curso: <strong>100% asistencia</strong> y <strong>Críticos (&lt;85%)</strong>. Requiere definir los <em>días de clases</em> del curso en el mes.</p>
+
+  {% for item in cursos_data %}
+    {% with idx=forloop.counter %}
+    <div class="card mb-4 shadow-sm">
+      <div class="card-body">
+
+        <!-- Encabezado con botón expandir/contraer -->
+        <div class="d-flex flex-wrap justify-content-between align-items-center mb-3">
+          <div class="d-flex align-items-center gap-2">
+            <button
+              class="btn btn-outline-dark btn-sm toggle-btn"
+              type="button"
+              data-bs-toggle="collapse"
+              data-bs-target="#curso_{{ idx }}"
+              aria-expanded="true"
+              aria-controls="curso_{{ idx }}"
+            >
+              <span class="chevron rotate">▶</span>
+              <span class="ms-1">{{ item.curso.nombre }}</span>
+            </button>
+          </div>
+
+          <div>
+            {% if item.sin_dias %}
+              <span class="badge text-bg-secondary">Sin días definidos</span>
+            {% else %}
+              <span class="badge text-bg-info">Días del mes: {{ item.dias_curso }}</span>
+            {% endif %}
+            <span class="badge text-bg-light border ms-2">Alumnos: {{ item.n_alumnos }}</span>
+            <a class="btn btn-link btn-sm ms-2" href="{% url 'asistencia_mensual' %}?curso={{ item.curso.id }}&mes={{ mes }}">Editar asistencia</a>
+          </div>
+        </div>
+
+        <!-- Contenido colapsable -->
+        <div class="collapse show" id="curso_{{ idx }}">
+          {% if item.sin_dias %}
+            <div class="alert alert-secondary mb-0">
+              Para este curso no se han definido los <strong>días de clases</strong> del mes seleccionado.
+              Defínelos en <a href="{% url 'asistencia_mensual' %}?curso={{ item.curso.id }}&mes={{ mes }}">Asistencia mensual</a>.
+            </div>
+          {% else %}
+            <div class="row g-3">
+              <!-- 100% Asistencia -->
+              <div class="col-12 col-lg-6">
+                <div class="card border-success h-100">
+                  <div class="card-header bg-success-subtle border-success">
+                    <strong>✅ 100% asistencia</strong>
+                  </div>
+                  <div class="card-body p-0">
+                    <div class="table-responsive">
+                      <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                          <tr>
+                            <th>Alumno</th>
+                            <th class="text-end">Presentes</th>
+                            <th class="text-end">Inasist.</th>
+                            <th class="text-end">% Asist.</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% if item.perfectos %}
+                            {% for al, pre, ina, pct in item.perfectos %}
+                              <tr class="table-success">
+                                <td>{{ al.nombre_completo }}</td>
+                                <td class="text-end">{{ pre }}</td>
+                                <td class="text-end">{{ ina }}</td>
+                                <td class="text-end"><strong>{{ pct }}%</strong></td>
+                              </tr>
+                            {% endfor %}
+                          {% else %}
+                            <tr>
+                              <td colspan="4" class="text-center text-muted py-3">Sin alumnos con asistencia perfecta.</td>
+                            </tr>
+                          {% endif %}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Críticos (<85%) -->
+              <div class="col-12 col-lg-6">
+                <div class="card border-danger h-100">
+                  <div class="card-header bg-danger-subtle border-danger">
+                    <strong>⚠️ Alumnos críticos (&lt;85%)</strong>
+                  </div>
+                  <div class="card-body p-0">
+                    <div class="table-responsive">
+                      <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                          <tr>
+                            <th>Alumno</th>
+                            <th class="text-end">Presentes</th>
+                            <th class="text-end">Inasist.</th>
+                            <th class="text-end">% Asist.</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {% if item.criticos %}
+                            {% for al, pre, ina, pct in item.criticos %}
+                              <tr class="table-danger">
+                                <td>{{ al.nombre_completo }}</td>
+                                <td class="text-end">{{ pre }}</td>
+                                <td class="text-end">{{ ina }}</td>
+                                <td class="text-end"><strong>{{ pct }}%</strong></td>
+                              </tr>
+                            {% endfor %}
+                          {% else %}
+                            <tr>
+                              <td colspan="4" class="text-center text-muted py-3">Sin alumnos críticos.</td>
+                            </tr>
+                          {% endif %}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endwith %}
+  {% endfor %}
+</div>
+
+<script>
+  // Rotación del chevron según colapso/expansión
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.toggle-btn').forEach(btn => {
+      const targetSel = btn.getAttribute('data-bs-target');
+      const target = document.querySelector(targetSel);
+      const icon = btn.querySelector('.chevron');
+
+      // Estado inicial (si .show, icono rotado)
+      if (target && target.classList.contains('show')) {
+        icon.classList.add('rotate');
+      } else {
+        icon.classList.remove('rotate');
+      }
+
+      // Escucha eventos de Bootstrap Collapse
+      target?.addEventListener('show.bs.collapse', () => icon.classList.add('rotate'));
+      target?.addEventListener('hide.bs.collapse', () => icon.classList.remove('rotate'));
+    });
+  });
+</script>
+{% endblock %}
