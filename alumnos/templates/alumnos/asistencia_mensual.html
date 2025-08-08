@@ -1,14 +1,31 @@
 {% extends "alumnos/base.html" %}
 {% block title %}Asistencia Mensual{% endblock %}
 {% block content %}
+<!-- Bootstrap Icons -->
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+
 <style>
-  /* Indicadores de estado */
   .estado { font-size: .85rem; white-space: nowrap; }
   .estado.saving::before { content: "⏳ Guardando…"; color: #6c757d; }
   .estado.saved::before  { content: "✓ Guardado"; color: #198754; }
-  .estado.error::before  { content: "✖ Error"; color: #dc3545; }
   .fade-out { animation: fadeout 1.8s forwards; }
   @keyframes fadeout { 0%{opacity:1} 70%{opacity:1} 100%{opacity:0} }
+  .edit-icon { cursor: pointer; color: #0d6efd; margin-left: 8px; }
+
+  /* Estilos del modal simple (si no usas Bootstrap Modal) */
+  .simple-modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none; z-index: 1050;
+  }
+  .simple-modal {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 95%; max-width: 420px; background: #fff; border-radius: .5rem; box-shadow: 0 0.5rem 1rem rgba(0,0,0,.15);
+    display: none; z-index: 1060;
+  }
+  .simple-modal header { padding: .75rem 1rem; border-bottom: 1px solid #eee; font-weight: 600; }
+  .simple-modal .body { padding: 1rem; }
+  .simple-modal footer { padding: .75rem 1rem; border-top: 1px solid #eee; display: flex; gap: .5rem; justify-content: flex-end; }
+  .btn-pencil { border: none; background: transparent; padding: 2px 6px; line-height: 1; color: #6c757d; cursor: pointer; }
+  .btn-pencil:hover { color: #0d6efd; }
 </style>
 
 <div class="card card-custom p-4">
@@ -39,18 +56,25 @@
       <table class="table table-bordered align-middle" id="tablaAsistencia">
         <thead class="table-light">
           <tr>
-            <th>Alumno</th>
-            <th>Días Presentes</th>
-            <th>Días Inasistentes</th>
-            <th>Porcentaje Asistencia (%)</th>
+            <th style="min-width: 260px;">Alumno</th>
+            <th style="width: 160px;">Días Presentes</th>
+            <th style="width: 160px;">Días Inasistentes</th>
+            <th style="width: 170px;">Porcentaje Asistencia (%)</th>
           </tr>
         </thead>
         <tbody>
           {% for item in alumnos_asistencia %}
             <tr data-alumno-id="{{ item.alumno.id }}">
               <td class="alumno-nombre">
-                {{ item.alumno.nombre_completo }}
-                <div class="estado d-inline-block ms-2 estado-fila"></div>
+                <div class="d-flex align-items-center gap-2">
+                  <button type="button" class="btn-pencil js-open-editor" title="Editar totales de este alumno">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708L5.207 14.5H2v-3.207L12.146.146zM11.207 2 3 10.207V13h2.793L14 4.793 11.207 2z"/>
+                    </svg>
+                  </button>
+                  <span>{{ item.alumno.nombre_completo }}</span>
+                  <div class="estado d-inline-block ms-2 estado-fila"></div>
+                </div>
               </td>
               <td>
                 <input type="number" name="presentes_{{ item.alumno.id }}" class="form-control input-presentes"
@@ -61,7 +85,7 @@
                   value="{{ item.asistencia.inasistentes|default:0 }}" min="0" step="1">
               </td>
               <td class="text-center celda-porcentaje">
-                <span class="valor-porcentaje">{{ item.porcentaje }}</span>%
+                <span class="valor-porcentaje">{{ item.porcentaje|floatformat:2 }}</span>%
               </td>
             </tr>
           {% endfor %}
@@ -73,7 +97,7 @@
               <div class="estado d-inline-block ms-2" id="estado-dias"></div>
             </td>
             <td colspan="2" class="text-end"><strong>Promedio General Asistencia:</strong></td>
-            <td class="text-center"><strong><span id="promedioAsistencia">{{ promedio_asistencia }}</span>%</strong></td>
+            <td class="text-center"><strong><span id="promedioAsistencia">{{ promedio_asistencia|floatformat:2 }}</span>%</strong></td>
           </tr>
         </tfoot>
       </table>
@@ -92,6 +116,30 @@
   {% endif %}
 </div>
 
+<!-- Modal simple (flotante) -->
+<div class="simple-modal-backdrop" id="editorBackdrop"></div>
+<div class="simple-modal" id="editorModal" role="dialog" aria-modal="true" aria-labelledby="editorTitle">
+  <header><div id="editorTitle">Editar totales del alumno</div></header>
+  <div class="body">
+    <div class="mb-2"><strong id="editorAlumnoNombre"></strong></div>
+    <div class="row g-2">
+      <div class="col-6">
+        <label class="form-label">Presentes</label>
+        <input type="number" id="editorPresentes" class="form-control" min="0" step="1">
+      </div>
+      <div class="col-6">
+        <label class="form-label">Inasistentes</label>
+        <input type="number" id="editorInasistentes" class="form-control" min="0" step="1">
+      </div>
+    </div>
+    <div class="form-text mt-1">El porcentaje se calculará respecto a los <em>días de clases del curso</em>.</div>
+  </div>
+  <footer>
+    <button type="button" class="btn btn-outline-secondary" id="editorCancelar">Cancelar</button>
+    <button type="button" class="btn btn-primary" id="editorGuardar">Guardar</button>
+  </footer>
+</div>
+
 <script>
 (function() {
   const diasInput = document.getElementById('dias_clases');
@@ -103,219 +151,185 @@
   const totalAlumnosSpan = document.getElementById('totalAlumnos');
   const estadoDias = document.getElementById('estado-dias');
 
+  // Modal simple
+  const modal = document.getElementById('editorModal');
+  const backdrop = document.getElementById('editorBackdrop');
+  const editorNombre = document.getElementById('editorAlumnoNombre');
+  const editorPresentes = document.getElementById('editorPresentes');
+  const editorInasistentes = document.getElementById('editorInasistentes');
+  const btnEditorCancelar = document.getElementById('editorCancelar');
+  const btnEditorGuardar = document.getElementById('editorGuardar');
+  let currentRow = null;
+
+  function openModalForRow(row) {
+    currentRow = row;
+    const nombre = row.querySelector('.alumno-nombre span')?.textContent?.trim() || 'Alumno';
+    const p = parseInt(row.querySelector('.input-presentes').value || '0', 10) || 0;
+    const i = parseInt(row.querySelector('.input-inasistentes').value || '0', 10) || 0;
+
+    editorNombre.textContent = nombre;
+    editorPresentes.value = p;
+    editorInasistentes.value = i;
+
+    backdrop.style.display = 'block';
+    modal.style.display = 'block';
+  }
+  function closeModal() {
+    modal.style.display = 'none';
+    backdrop.style.display = 'none';
+    currentRow = null;
+  }
+  btnEditorCancelar.addEventListener('click', closeModal);
+  backdrop.addEventListener('click', closeModal);
+
+  btnEditorGuardar.addEventListener('click', () => {
+    if (!currentRow) return;
+    let p = parseInt(editorPresentes.value || '0', 10); if (isNaN(p)) p = 0;
+    let i = parseInt(editorInasistentes.value || '0', 10); if (isNaN(i)) i = 0;
+    if (p < 0) p = 0; if (i < 0) i = 0;
+
+    const inpP = currentRow.querySelector('.input-presentes');
+    const inpI = currentRow.querySelector('.input-inasistentes');
+    inpP.value = p;
+    inpI.value = i;
+
+    guardarFila(currentRow.dataset.alumnoId, p, i, currentRow);
+    closeModal();
+  });
+
   function getCSRFTOKEN() {
     const input = document.querySelector('input[name=csrfmiddlewaretoken]');
     return input ? input.value : '';
   }
 
-  function getTotal() {
-    const v = parseInt(diasInput.value, 10);
-    return isNaN(v) ? 0 : Math.max(0, v);
-  }
-
   function clamp(n, min, max) { return Math.min(Math.max(n, min), max); }
 
-  function calcularPorcentaje(presentes, total) {
-    if (!total || total <= 0) return 0;
-    return Math.round((presentes / total) * 1000) / 10; // 1 decimal
-  }
-
   function actualizarFooter() {
-    const total = getTotal();
-    let sumaPorcentajes = 0;
-    let filas = 0;
-
+    let sumaPorcentajes = 0, filas = 0;
     tabla.querySelectorAll('tbody tr[data-alumno-id]').forEach(row => {
-      const p = parseInt(row.querySelector('.input-presentes').value || '0', 10);
-      const porcentaje = calcularPorcentaje(p, total);
-      sumaPorcentajes += porcentaje;
-      filas += 1;
+      const span = row.querySelector('.celda-porcentaje .valor-porcentaje');
+      const pct = parseFloat(span ? (span.textContent || '0') : '0');
+      if (!isNaN(pct)) { sumaPorcentajes += pct; filas++; }
     });
-
     if (totalAlumnosSpan) totalAlumnosSpan.textContent = filas.toString();
     if (promedioSpan) {
       const prom = filas ? Math.round((sumaPorcentajes / filas) * 10) / 10 : 0;
-      promedioSpan.textContent = prom.toFixed(1);
+      promedioSpan.textContent = prom.toFixed(2);
     }
   }
 
-  // --- Indicadores de estado ---
-  function setEstado(el, clase) {
-    if (!el) return;
-    el.classList.remove('saving', 'saved', 'error', 'fade-out');
-    if (clase) el.classList.add(clase);
-    if (clase === 'saved') {
-      setTimeout(() => el.classList.add('fade-out'), 300);
-      setTimeout(() => { el.classList.remove('saved', 'fade-out'); }, 2200);
-    }
+  // === CAMBIO 1: Porcentaje respecto a DÍAS DEL CURSO ===
+  function porcentajeRespectoCurso(presentes) {
+    const diasCurso = parseInt(diasInput.value || '0', 10) || 0;
+    if (diasCurso <= 0) return 0;
+    return (presentes / diasCurso) * 100;
   }
 
-  // --- AUTOSAVE ---
-  let saveTimer = null;
-  function debounceSave(fn) {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(fn, 400);
-  }
+  // Guarda por fila (autosave)
+  function guardarFila(alumnoId, presentes, inasistentes, fila) {
+    const estado = fila.querySelector('.estado-fila');
+    estado.className = 'estado estado-fila saving';
 
-  function autosaveAsistencia(row) {
-    const total = getTotal();
-    const alumnoId = row.getAttribute('data-alumno-id');
-    const inpP = row.querySelector('.input-presentes');
-    const inpI = row.querySelector('.input-inasistentes');
-    const estadoFila = row.querySelector('.estado-fila');
-
-    let p = parseInt(inpP.value || '0', 10);
-    let i = parseInt(inpI.value || '0', 10);
-
-    // Normaliza con el total
-    p = clamp(isNaN(p) ? 0 : p, 0, total);
-    i = clamp(isNaN(i) ? 0 : i, 0, total);
-    if (p + i !== total) { i = clamp(total - p, 0, total); }
-    inpP.value = p; inpI.value = i;
-
-    // % y footer
-    const celdaPct = row.querySelector('.celda-porcentaje .valor-porcentaje');
-    const pct = calcularPorcentaje(p, total);
-    if (celdaPct) celdaPct.textContent = pct.toFixed(1);
+    // === CAMBIO 2: usa días del curso para el % en el front ===
+    const pct = porcentajeRespectoCurso(presentes);
+    fila.querySelector('.valor-porcentaje').textContent = pct.toFixed(2);
     actualizarFooter();
 
-    setEstado(estadoFila, 'saving');
+    const fd = new FormData();
+    fd.append('alumno_id', alumnoId);
+    fd.append('curso_id', cursoId);
+    fd.append('mes', mesActual);
+    fd.append('presentes', presentes);
+    fd.append('inasistentes', inasistentes);
 
-    const formData = new FormData();
-    formData.append('alumno_id', alumnoId);
-    formData.append('curso_id', cursoId);
-    formData.append('mes', mesActual);
-    formData.append('presentes', p);
-    formData.append('inasistentes', i);
-
-    fetch('{% url "ajax_actualizar_asistencia" %}', {
+    fetch("{% url 'ajax_actualizar_asistencia' %}", {
       method: 'POST',
       headers: { 'X-CSRFToken': getCSRFTOKEN() },
-      body: formData
-    }).then(r => r.json()).then(data => {
+      body: fd
+    })
+    .then(r => r.json())
+    .then(data => {
       if (!data.ok) {
-        setEstado(estadoFila, 'error');
-        console.warn('No se pudo guardar automáticamente:', data.error);
+        estado.className = 'estado estado-fila error';
       } else {
-        if (typeof data.porcentaje === 'number' && celdaPct) {
-          celdaPct.textContent = data.porcentaje.toFixed(1);
+        // opcional: toma el % del backend (también calculado con días del curso)
+        if (typeof data.porcentaje === 'number') {
+          fila.querySelector('.valor-porcentaje').textContent = data.porcentaje.toFixed(2);
+          actualizarFooter();
         }
-        actualizarFooter();
-        setEstado(estadoFila, 'saved');
+        estado.className = 'estado estado-fila saved fade-out';
       }
-    }).catch(err => {
-      setEstado(estadoFila, 'error');
-      console.error('Error autosave:', err);
-    });
+    })
+    .catch(() => { estado.className = 'estado estado-fila error'; });
   }
-
-  function autosaveDiasClases() {
-    if (!estadoDias) return;
-    setEstado(estadoDias, 'saving');
-
-    const formData = new FormData();
-    formData.append('curso_id', cursoId);
-    formData.append('mes', mesActual);
-    formData.append('dias_clases', getTotal());
-
-    fetch('{% url "ajax_actualizar_dias_clases" %}', {
-      method: 'POST',
-      headers: { 'X-CSRFToken': getCSRFTOKEN() },
-      body: formData
-    }).then(r => r.json()).then(data => {
-      if (!data.ok) {
-        setEstado(estadoDias, 'error');
-        console.warn('No se pudieron guardar los días de clases:', data.error);
-      } else {
-        setEstado(estadoDias, 'saved');
-      }
-    }).catch(err => {
-      setEstado(estadoDias, 'error');
-      console.error('Error guardando días de clases:', err);
-    });
-  }
-
-  // --- Edición por fila ---
-  function syncRow(row, changedField) {
-    const total = getTotal();
-    const inpP = row.querySelector('.input-presentes');
-    const inpI = row.querySelector('.input-inasistentes');
-
-    let p = parseInt(inpP.value, 10);
-    let i = parseInt(inpI.value, 10);
-    p = isNaN(p) ? 0 : p;
-    i = isNaN(i) ? 0 : i;
-
-    if (changedField === 'P') {
-      p = clamp(p, 0, total);
-      i = clamp(total - p, 0, total);
-    } else if (changedField === 'I') {
-      i = clamp(i, 0, total);
-      p = clamp(total - i, 0, total);
-    }
-
-    inpP.value = p;
-    inpI.value = i;
-
-    const celdaPct = row.querySelector('.celda-porcentaje .valor-porcentaje');
-    const pct = calcularPorcentaje(p, total);
-    if (celdaPct) celdaPct.textContent = pct.toFixed(1);
-    actualizarFooter();
-
-    debounceSave(() => autosaveAsistencia(row));
-  }
-
-  // ========= CAMBIO CLAVE =========
-  // Cuando cambian los días de clases:
-  //  -> Setea TODAS las filas a Presentes = total, Inasistentes = 0
-  //  -> Recalcula % y footer
-  //  -> Autosave SOLO de los días totales (no por alumno)
-  diasInput.addEventListener('input', () => {
-    const total = getTotal();
-    tabla.querySelectorAll('tbody tr[data-alumno-id]').forEach(row => {
-      const inpP = row.querySelector('.input-presentes');
-      const inpI = row.querySelector('.input-inasistentes');
-      inpP.value = total;
-      inpI.value = 0;
-      inpP.max = total;
-      inpI.max = total;
-
-      const celdaPct = row.querySelector('.celda-porcentaje .valor-porcentaje');
-      if (celdaPct) celdaPct.textContent = calcularPorcentaje(total, total).toFixed(1); // 100.0 o 0 si total=0
-    });
-    actualizarFooter();
-    debounceSave(autosaveDiasClases);
-  });
 
   // Listeners de edición manual
-  tabla.querySelectorAll('.input-presentes').forEach(inp => {
-    inp.addEventListener('input', (e) => { syncRow(e.target.closest('tr'), 'P'); });
-  });
-  tabla.querySelectorAll('.input-inasistentes').forEach(inp => {
-    inp.addEventListener('input', (e) => { syncRow(e.target.closest('tr'), 'I'); });
+  tabla.querySelectorAll('.input-presentes, .input-inasistentes').forEach(input => {
+    input.addEventListener('input', function() {
+      const row = this.closest('tr');
+      const alumnoId = row.dataset.alumnoId;
+      const totalCurso = parseInt(diasInput.value || '0', 10) || 0;
+
+      let presentes = parseInt(row.querySelector('.input-presentes').value || '0', 10); if (isNaN(presentes)) presentes = 0;
+      let inasistentes = parseInt(row.querySelector('.input-inasistentes').value || '0', 10); if (isNaN(inasistentes)) inasistentes = 0;
+
+      if (this.classList.contains('input-inasistentes')) {
+        inasistentes = clamp(inasistentes, 0, totalCurso);
+        presentes = clamp(totalCurso - inasistentes, 0, totalCurso);
+        row.querySelector('.input-presentes').value = presentes;
+        row.querySelector('.input-inasistentes').value = inasistentes;
+      } else {
+        presentes = clamp(presentes, 0, totalCurso);
+        inasistentes = clamp(totalCurso - presentes, 0, totalCurso);
+        row.querySelector('.input-presentes').value = presentes;
+        row.querySelector('.input-inasistentes').value = inasistentes;
+      }
+
+      guardarFila(alumnoId, presentes, inasistentes, row);
+    });
   });
 
-  // ========= NUEVO: Normaliza antes de enviar (por si cambiaste días y guardaste rápido)
-  if (form) {
-    form.addEventListener('submit', (e) => {
-      const total = getTotal();
+  // Cambian los días del curso => todos a presentes=total, inasistentes=0, % = 100
+  if (diasInput) {
+    diasInput.addEventListener('input', () => {
+      const total = parseInt(diasInput.value || '0', 10) || 0;
       tabla.querySelectorAll('tbody tr[data-alumno-id]').forEach(row => {
-        const inpP = row.querySelector('.input-presentes');
-        const inpI = row.querySelector('.input-inasistentes');
-        let p = parseInt(inpP.value || '0', 10);
-        let i = parseInt(inpI.value || '0', 10);
-        if (isNaN(p)) p = 0;
-        if (isNaN(i)) i = 0;
-        p = clamp(p, 0, total);
-        i = clamp(total - p, 0, total); // fuerza suma = total
-        inpP.value = p;
-        inpI.value = i;
+        row.querySelector('.input-presentes').value = total;
+        row.querySelector('.input-inasistentes').value = 0;
+        // Mostrar % 100.0 en el front inmediatamente
+        row.querySelector('.valor-porcentaje').textContent = (total > 0 ? 100.0 : 0.0).toFixed(2);
+        // Persistir cada fila
+        guardarFila(row.dataset.alumnoId, total, 0, row);
       });
     });
   }
 
-  // Inicializa footer al cargar
-  window.addEventListener('DOMContentLoaded', actualizarFooter);
+  // Botón lápiz abre modal
+  tabla.querySelectorAll('.js-open-editor').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const row = e.target.closest('tr') || e.target.closest('button')?.closest('tr');
+      if (row) openModalForRow(row);
+    });
+  });
+
+  // Submit manual (por si usas el botón grande)
+  if (form) {
+    form.addEventListener('submit', (e) => {
+      // No toco nada de tu flujo original.
+      // El botón lo usas para "Guardar Asistencia" (especialmente días del curso).
+    });
+  }
+
+  // Inicializar % al cargar: usar días del curso
+  window.addEventListener('DOMContentLoaded', () => {
+    const diasCurso = parseInt(diasInput.value || '0', 10) || 0;
+    tabla.querySelectorAll('tbody tr[data-alumno-id]').forEach(row => {
+      const p = parseInt(row.querySelector('.input-presentes').value || '0', 10) || 0;
+      const pct = diasCurso > 0 ? (p / diasCurso) * 100 : 0;
+      row.querySelector('.valor-porcentaje').textContent = pct.toFixed(2);
+    });
+    actualizarFooter();
+  });
 })();
 </script>
 {% endblock %}
