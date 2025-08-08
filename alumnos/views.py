@@ -22,6 +22,9 @@ from openpyxl.chart import BarChart, Reference
 from openpyxl.utils import get_column_letter
 
 
+
+
+
 def normalizar(texto):
     if pd.isna(texto):
         return ""
@@ -229,37 +232,39 @@ def asistencia_mensual(request):
     alumnos = Alumno.objects.filter(curso=curso).order_by('nombre_completo') if curso else []
 
     if request.method == 'POST' and curso:
-        # Guarda SIEMPRE (aunque no haya días definidos)
         for alumno in alumnos:
             presentes = int(request.POST.get(f'presentes_{alumno.id}', 0) or 0)
             inasistentes = int(request.POST.get(f'inasistentes_{alumno.id}', 0) or 0)
 
-            asistencia, created = AsistenciaMensual.objects.get_or_create(
+            asistencia, _ = AsistenciaMensual.objects.get_or_create(
                 alumno=alumno,
                 mes=mes_date,
-                defaults={'curso': curso}  # ✅ evita NOT NULL en el INSERT
+                defaults={'curso': curso}
             )
-            # En caso de registros antiguos sin curso:
-            if not asistencia.curso_id:
-                asistencia.curso = curso
-
             asistencia.presentes = presentes
             asistencia.inasistentes = inasistentes
+            asistencia.curso = curso
             asistencia.save()
 
-        # Guarda días de clases del curso en el mes (aunque sea 0)
         dias = int(request.POST.get('dias_clases', 0) or 0)
         dcm, _ = DiasClaseMensual.objects.get_or_create(curso=curso, mes=mes_date)
         dcm.dias_clases = dias
         dcm.save()
 
+        # ✅ Sobrescribe los días personalizados al nuevo valor
+        asistencias = AsistenciaMensual.objects.filter(curso=curso, mes=mes_date)
+        for a in asistencias:
+            total = a.presentes + a.inasistentes
+            if total != dias:
+                a.presentes = min(a.presentes, dias)
+                a.inasistentes = dias - a.presentes
+                a.save()
+
         messages.success(request, '✅ Asistencia actualizada correctamente.')
         return redirect(f'/asistencia_mensual/?curso={curso_id}&mes={mes_str}')
 
-    # Carga para mostrar
     asistencias_dict = {
-        a.alumno.id: a
-        for a in AsistenciaMensual.objects.filter(mes=mes_date, alumno__curso=curso)
+        a.alumno.id: a for a in AsistenciaMensual.objects.filter(mes=mes_date, alumno__curso=curso)
     }
     dcm = DiasClaseMensual.objects.filter(curso=curso, mes=mes_date).first()
     dias_total = dcm.dias_clases if dcm else 0
@@ -268,18 +273,22 @@ def asistencia_mensual(request):
     total_porcentajes = 0
     for alumno in alumnos:
         asistencia = asistencias_dict.get(alumno.id)
-        if asistencia and dias_total > 0:
-            porcentaje = round((asistencia.presentes / dias_total) * 100, 1)
+        if asistencia:
+            dias_personal = asistencia.presentes + asistencia.inasistentes
+            porcentaje = round((asistencia.presentes / dias_personal) * 100, 1) if dias_personal > 0 else 0.0
         else:
             porcentaje = 0.0
-        total_porcentajes += porcentaje
+            dias_personal = dias_total
+
         alumnos_asistencia.append({
             'alumno': alumno,
             'asistencia': asistencia,
             'porcentaje': porcentaje,
+            'dias_personales': dias_personal if dias_personal != dias_total else None
         })
+        total_porcentajes += porcentaje
 
-    promedio_asistencia = round(total_porcentajes / len(alumnos_asistencia), 1) if alumnos_asistencia else 0.0
+    promedio_asistencia = round(total_porcentajes / len(alumnos_asistencia), 2) if alumnos_asistencia else 0.0
 
     return render(request, 'alumnos/asistencia_mensual.html', {
         'cursos': cursos,
@@ -293,17 +302,38 @@ def asistencia_mensual(request):
     })
 
 
+@login_required
+def ajax_actualizar_dias_individuales(request):
+    if request.method == 'POST':
+        try:
+            alumno_id = int(request.POST.get('alumno_id'))
+            mes = request.POST.get('mes')
+            nuevos_dias = int(request.POST.get('dias'))
+
+            alumno = Alumno.objects.get(id=alumno_id)
+            mes_date = datetime.strptime(mes, '%Y-%m').date().replace(day=1)
+
+            asistencia, _ = AsistenciaMensual.objects.get_or_create(
+                alumno=alumno,
+                mes=mes_date,
+                defaults={'curso': alumno.curso}
+            )
+
+            asistencia.presentes = min(asistencia.presentes, nuevos_dias)
+            asistencia.inasistentes = nuevos_dias - asistencia.presentes
+            asistencia.save()
+
+            return JsonResponse({'ok': True})
+        except Exception as e:
+            return JsonResponse({'ok': False, 'error': str(e)})
+    return JsonResponse({'ok': False, 'error': 'Método no permitido'})
+
 
 # ===========================
-# AJAX: Auto-guardado de presentes/inasistentes por alumno
+# AJAX: Auto-guardado de presentes/inasistentes
 # ===========================
 @login_required
 def ajax_actualizar_asistencia(request):
-    """
-    Autosave: presentes/inasistentes de un alumno.
-    POST: alumno_id, curso_id, mes(YYYY-MM), presentes, inasistentes
-    Resp: {ok, porcentaje}
-    """
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'Método no permitido'}, status=405)
 
@@ -324,30 +354,29 @@ def ajax_actualizar_asistencia(request):
             defaults={
                 'presentes': presentes,
                 'inasistentes': inasistentes,
-                'curso': curso,  # ✅ importante para NOT NULL
+                'curso': curso,
             }
         )
 
+        # % basado en los DÍAS DEL CURSO (no en p+i)
         dcm = DiasClaseMensual.objects.filter(curso=curso, mes=mes_date).first()
-        dias_total = dcm.dias_clases if dcm else 0
-        porcentaje = round((presentes / dias_total) * 100, 1) if dias_total else 0.0
+        dias_curso = int(dcm.dias_clases) if dcm and dcm.dias_clases else 0
+
+        if dias_curso > 0:
+            porcentaje = round((presentes / dias_curso) * 100, 1)
+        else:
+            porcentaje = 0.0
 
         return JsonResponse({'ok': True, 'porcentaje': porcentaje})
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)}, status=400)
 
 
-
 # ===========================
-# AJAX: Auto-guardado de días de clases del curso
+# AJAX: Auto-guardado días de clases del curso (sobrescribe todo)
 # ===========================
 @login_required
 def ajax_actualizar_dias_clases(request):
-    """
-    Autosave: días de clases del curso en el mes.
-    POST: curso_id, mes(YYYY-MM), dias_clases
-    Resp: {ok}
-    """
     if request.method != 'POST':
         return JsonResponse({'ok': False, 'error': 'Método no permitido'}, status=405)
 
@@ -363,9 +392,21 @@ def ajax_actualizar_dias_clases(request):
         dcm.dias_clases = dias
         dcm.save()
 
+        # ✅ Sobrescribir presentes si hay menos días que antes
+        asistencias = AsistenciaMensual.objects.filter(curso=curso, mes=mes_date)
+        for a in asistencias:
+            total = a.presentes + a.inasistentes
+            if total != dias:
+                a.presentes = min(a.presentes, dias)
+                a.inasistentes = dias - a.presentes
+                a.save()
+
         return JsonResponse({'ok': True})
     except Exception as e:
         return JsonResponse({'ok': False, 'error': str(e)}, status=400)
+    
+    
+    
 
     
     
